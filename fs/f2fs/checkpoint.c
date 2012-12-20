@@ -209,12 +209,8 @@ int acquire_orphan_inode(struct f2fs_sb_info *sbi)
 void release_orphan_inode(struct f2fs_sb_info *sbi)
 {
 	spin_lock(&sbi->orphan_inode_lock);
-	if (sbi->n_orphans == 0) {
-		f2fs_msg(sbi->sb, KERN_ERR, "releasing "
-			"unacquired orphan inode");
-		f2fs_handle_error(sbi);
-	} else
-		sbi->n_orphans--;
+	f2fs_bug_on(sbi->n_orphans == 0);
+	sbi->n_orphans--;
 	spin_unlock(&sbi->orphan_inode_lock);
 }
 
@@ -260,13 +256,8 @@ void remove_orphan_inode(struct f2fs_sb_info *sbi, nid_t ino)
 		if (orphan->ino == ino) {
 			list_del(&orphan->list);
 			kmem_cache_free(orphan_entry_slab, orphan);
-			if (sbi->n_orphans == 0) {
-				f2fs_msg(sbi->sb, KERN_ERR, "removing "
-						"unacquired orphan inode %d",
-						ino);
-				f2fs_handle_error(sbi);
-			} else
-				sbi->n_orphans--;
+			f2fs_bug_on(sbi->n_orphans == 0);
+			sbi->n_orphans--;
 			break;
 		}
 	}
@@ -276,12 +267,7 @@ void remove_orphan_inode(struct f2fs_sb_info *sbi, nid_t ino)
 static void recover_orphan_inode(struct f2fs_sb_info *sbi, nid_t ino)
 {
 	struct inode *inode = f2fs_iget(sbi->sb, ino);
-	if (IS_ERR(inode)) {
-		f2fs_msg(sbi->sb, KERN_ERR, "unable to recover orphan inode %d",
-				ino);
-		f2fs_handle_error(sbi);
-		return;
-	}
+	f2fs_bug_on(IS_ERR(inode));
 	clear_nlink(inode);
 
 	/* truncate all the data during iput */
