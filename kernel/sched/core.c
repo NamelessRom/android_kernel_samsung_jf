@@ -5925,7 +5925,7 @@ static void update_top_cache_domain(int cpu)
 	int id = cpu;
 
 	sd = highest_flag_domain(cpu, SD_SHARE_PKG_RESOURCES);
-	if (sd)
+	if (sd) {
 		id = cpumask_first(sched_domain_span(sd));
 
 	rcu_assign_pointer(per_cpu(sd_llc, cpu), sd);
