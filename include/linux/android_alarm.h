@@ -27,6 +27,9 @@ enum android_alarm_type {
 	ANDROID_ALARM_ELAPSED_REALTIME,
 	ANDROID_ALARM_RTC_POWEROFF_WAKEUP,
 	ANDROID_ALARM_SYSTEMTIME,
+/* OPPO 2012-09-12 liujun Add begin for add power up alarm type */
+	ANDROID_ALARM_RTC_POWERUP, // mwalker for power up alarm
+/* OPPO 2012-09-12 liujun Add end */
 
 	ANDROID_ALARM_TYPE_COUNT,
 
@@ -81,6 +84,13 @@ int alarm_set_alarm(char *alarm_data);
 #endif /* CONFIG_AUTO_PWRON */
 void alarm_update_timedelta(struct timespec tv, struct timespec ts);
 
+/* OPPO 2012-09-12 liujun Add begin for add power up alarm type */
+/* mwalker for alarm powerup */
+int alarm_rtc_powerup_get(struct timespec *up_time);
+int alarm_rtc_powerup_set(struct timespec *up_time);
+void alarm_rtc_powerup_clear(void);
+/* OPPO 2012-09-12 liujun Add end */
+
 #endif
 
 enum android_alarm_return_flags {
@@ -92,6 +102,9 @@ enum android_alarm_return_flags {
 				1U << ANDROID_ALARM_ELAPSED_REALTIME,
 	ANDROID_ALARM_RTC_POWEROFF_WAKEUP_MASK = 1U << ANDROID_ALARM_RTC_POWEROFF_WAKEUP,
 	ANDROID_ALARM_SYSTEMTIME_MASK = 1U << ANDROID_ALARM_SYSTEMTIME,
+/* OPPO 2012-09-12 liujun Add begin for add power up alarm type */
+	ANDROID_ALARM_RTC_POWERUP_MASK = 1U << ANDROID_ALARM_RTC_POWERUP,  // mwalker for power up alarm
+/* OPPO 2012-09-12 liujun Add end */
 	ANDROID_ALARM_TIME_CHANGE_MASK = 1U << 16
 };
 
