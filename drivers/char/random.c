@@ -257,7 +257,7 @@
 #include <linux/kmemcheck.h>
 
 #ifdef CONFIG_GENERIC_HARDIRQS
-# include <linux/irq.h>
+#include <linux/irq.h>
 #endif
 
 #include <asm/processor.h>
