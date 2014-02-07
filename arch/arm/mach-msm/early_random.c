@@ -27,6 +27,8 @@ struct tz_prng_data {
 	uint32_t	out_buf_sz;
 } __packed;
 
+int common_scm_buf;
+
 DEFINE_SCM_BUFFER(common_scm_buf)
 DEFINE_MUTEX(arch_random_lock);
 #define RANDOM_BUFFER_SIZE	PAGE_SIZE
