@@ -1143,7 +1143,7 @@ static struct platform_device touchkey_i2c_gpio_device = {
 };
 
 static struct i2c_gpio_platform_data  cypress_touchkey_i2c_gpio_data_2 = {
-	.sda_pin		= GPIO_TOUCHKEY_SDA,	
+	.sda_pin		= GPIO_TOUCHKEY_SDA,
 	.scl_pin		= GPIO_TOUCHKEY_SCL_2,
 	.udelay			= 0,
 	.sda_is_open_drain	= 0,
@@ -3099,9 +3099,13 @@ static struct platform_device msm_tsens_device = {
 };
 
 static struct msm_thermal_data msm_thermal_pdata = {
-	.sensor_id = 7,
+	.sensor_id = 0,
 	.poll_ms = 250,
+#ifdef CONFIG_CPU_OVERCLOCK
+	.limit_temp_degC = 75,
+#else
 	.limit_temp_degC = 60,
+#endif
 	.temp_hysteresis_degC = 10,
 	.freq_step = 2,
 };
@@ -4972,10 +4976,10 @@ static void sec_jack_init(void)
 		.pull			= PM_GPIO_PULL_NO,
 		.out_strength	= PM_GPIO_STRENGTH_HIGH,
 		.function		= PM_GPIO_FUNC_NORMAL,
-		.inv_int_pol	= 0,		
+		.inv_int_pol	= 0,
 		.vin_sel		= PM_GPIO_VIN_S4,
 		.output_buffer	= PM_GPIO_OUT_BUF_CMOS,
-		.output_value	= 1,		
+		.output_value	= 1,
 	};
 
 	static struct pm_gpio fsa8048_en_old = {
@@ -4983,10 +4987,10 @@ static void sec_jack_init(void)
 		.pull			= PM_GPIO_PULL_UP_30,
 		.out_strength	= PM_GPIO_STRENGTH_HIGH,
 		.function		= PM_GPIO_FUNC_NORMAL,
-		.inv_int_pol	= 0,		
+		.inv_int_pol	= 0,
 		.vin_sel		= PM_GPIO_VIN_S4,
 		.output_buffer	= PM_GPIO_OUT_BUF_CMOS,
-		.output_value	= 1,		
+		.output_value	= 1,
 	};
 
 	ret = gpio_request(PM8921_GPIO_PM_TO_SYS(PMIC_GPIO_EAR_MICBIAS_EN),
