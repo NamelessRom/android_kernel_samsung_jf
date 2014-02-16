@@ -1780,6 +1780,12 @@ config GPU_OVERCLOCK
 	help
 	  Kraint 600 ab GPU overclock up to 600 MHz
 
+config LOW_CPUCLOCKS
+	bool "Enable ultra low CPU clocks"
+	default n
+	help
+	  Ultra low cpu frequencies enabled for CPU and L2 Cache
+
 config INTELLI_PLUG
 	bool "Enable intelli-plug cpu hotplug driver"
 	default n
