@@ -21,7 +21,7 @@
  * If set, the suspend/hibernate code will abort transitions to a sleep state
  * if wakeup events are registered during or immediately before the transition.
  */
-bool events_check_enabled __read_most;
+bool events_check_enabled __read_mostly;
 
 /*
  * Combined counters of registered wakeup events and wakeup events in progress.
