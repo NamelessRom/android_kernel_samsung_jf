@@ -421,6 +421,11 @@ static int msm_fb_probe(struct platform_device *pdev)
 	rc = msm_fb_register(mfd);
 	if (rc)
 		return rc;
+
+	mfd->panel_info.xres_aligned = ALIGN(mfd->panel_info.xres, 64);
+	mfd->panel_info.yres_aligned = ALIGN(mfd->panel_info.yres, 64);
+	mfd->max_map_size = mfd->panel_info.xres_aligned * mfd->panel_info.yres_aligned * 4 * 2;
+
 	err = pm_runtime_set_active(mfd->fbi->dev);
 	if (err < 0)
 		printk(KERN_ERR "pm_runtime: fail to set active.\n");
@@ -1583,6 +1588,11 @@ static int msm_fb_register(struct msm_fb_data_type *mfd)
 	    ("FrameBuffer[%d] %dx%d size=%d bytes is registered successfully!\n",
 	     mfd->index, fbi->var.xres, fbi->var.yres, fbi->fix.smem_len);
 
+#ifdef CONFIG_UPDATE_LCDC_LUT
+	if (msm_fb_pdata->update_lcdc_lut)
+		msm_fb_pdata->update_lcdc_lut();
+#endif
+
 #ifdef CONFIG_FB_MSM_LOGO
 	/* Flip buffer */
 	if (!load_565rle_image(INIT_IMAGE_FILE, bf_supported))
@@ -1837,8 +1847,6 @@ int msm_fb_signal_timeline(struct msm_fb_data_type *mfd)
 		sw_sync_timeline_inc(mfd->timeline, 1);
 		mfd->timeline_value++;
 	}
-	mfd->last_rel_fence = mfd->cur_rel_fence;
-	mfd->cur_rel_fence = 0;
 	if (atomic_read(&mfd->commit_cnt) > 0)
 		atomic_dec(&mfd->commit_cnt);
 	mutex_unlock(&mfd->sync_mutex);
@@ -1849,15 +1857,13 @@ void msm_fb_release_timeline(struct msm_fb_data_type *mfd)
 {
 	u32 commit_cnt;
 	mutex_lock(&mfd->sync_mutex);
-	commit_cnt = atomic_read(&mfd->commit_cnt) + 2;
+	commit_cnt = atomic_read(&mfd->commit_cnt) + 3;
 	if (commit_cnt < 0)
 		commit_cnt = 0;
 	if (mfd->timeline) {
 		sw_sync_timeline_inc(mfd->timeline, 2 + commit_cnt);
 		mfd->timeline_value += 2 + commit_cnt;
 	}
-	mfd->last_rel_fence = 0;
-	mfd->cur_rel_fence = 0;
 	atomic_set(&mfd->commit_cnt, 0);
 	mutex_unlock(&mfd->sync_mutex);
 }
@@ -3706,6 +3712,12 @@ static int msmfb_handle_buf_sync_ioctl(struct msm_fb_data_type *mfd,
 	u32 threshold;
 	int acq_fen_fd[MDP_MAX_FENCE_FD];
 	struct sync_fence *fence;
+	struct sync_pt *release_sync_pt;
+	struct sync_pt *retire_sync_pt;
+	struct sync_fence *release_fence;
+	struct sync_fence *retire_fence;
+	int release_fen_fd;
+	int retire_fen_fd;
 
 	if ((buf_sync->acq_fen_fd_cnt > MDP_MAX_FENCE_FD) ||
 		(mfd->timeline == NULL))
@@ -3744,46 +3756,56 @@ static int msmfb_handle_buf_sync_ioctl(struct msm_fb_data_type *mfd,
 		threshold = 1;
 	else
 		threshold = 2;
-	mfd->cur_rel_sync_pt = sw_sync_pt_create(mfd->timeline,
-			mfd->timeline_value + threshold +
-			atomic_read(&mfd->commit_cnt));
-	if (mfd->cur_rel_sync_pt == NULL) {
-		pr_err("%s: cannot create sync point", __func__);
-		ret = -ENOMEM;
+
+	release_fen_fd = get_unused_fd_flags(0);
+	if (release_fen_fd < 0) {
+		pr_err("%s: get_unused_fd_flags failed", __func__);
+		ret  = -EIO;
 		goto buf_sync_err_1;
 	}
-	/* create fence */
-	mfd->cur_rel_fence = sync_fence_create("mdp-fence",
-			mfd->cur_rel_sync_pt);
-	if (mfd->cur_rel_fence == NULL) {
-		sync_pt_free(mfd->cur_rel_sync_pt);
-		mfd->cur_rel_sync_pt = NULL;
-		pr_err("%s: cannot create fence", __func__);
-		ret = -ENOMEM;
-		goto buf_sync_err_1;
-	}
-	/* create fd */
-	mfd->cur_rel_fen_fd = get_unused_fd_flags(0);
-	if (mfd->cur_rel_fen_fd < 0) {
+
+	retire_fen_fd = get_unused_fd_flags(0);
+	if (retire_fen_fd < 0) {
 		pr_err("%s: get_unused_fd_flags failed", __func__);
 		ret  = -EIO;
 		goto buf_sync_err_2;
 	}
-	sync_fence_install(mfd->cur_rel_fence, mfd->cur_rel_fen_fd);
+
+	release_sync_pt = sw_sync_pt_create(mfd->timeline,
+			mfd->timeline_value + threshold +
+			atomic_read(&mfd->commit_cnt));
+	release_fence = sync_fence_create("mdp-fence",
+			release_sync_pt);
+	sync_fence_install(release_fence, release_fen_fd);
+	retire_sync_pt = sw_sync_pt_create(mfd->timeline,
+			mfd->timeline_value + threshold +
+			atomic_read(&mfd->commit_cnt) + 1);
+	retire_fence = sync_fence_create("mdp-retire-fence",
+			retire_sync_pt);
+	sync_fence_install(retire_fence, retire_fen_fd);
+
 	ret = copy_to_user(buf_sync->rel_fen_fd,
-		&mfd->cur_rel_fen_fd, sizeof(int));
+		&release_fen_fd, sizeof(int));
 	if (ret) {
 		pr_err("%s:copy_to_user failed", __func__);
 		goto buf_sync_err_3;
 	}
+
+	ret = copy_to_user(buf_sync->retire_fen_fd,
+		&retire_fen_fd, sizeof(int));
+	if (ret) {
+		pr_err("%s:copy_to_user failed", __func__);
+		goto buf_sync_err_3;
+	}
+
 	mutex_unlock(&mfd->sync_mutex);
 	return ret;
 buf_sync_err_3:
-	put_unused_fd(mfd->cur_rel_fen_fd);
+	sync_fence_put(release_fence);
+	sync_fence_put(retire_fence);
+	put_unused_fd(retire_fen_fd);
 buf_sync_err_2:
-	sync_fence_put(mfd->cur_rel_fence);
-	mfd->cur_rel_fence = NULL;
-	mfd->cur_rel_fen_fd = 0;
+	put_unused_fd(release_fen_fd);
 buf_sync_err_1:
 	for (i = 0; i < mfd->acq_fen_cnt; i++)
 		sync_fence_put(mfd->acq_fen[i]);
