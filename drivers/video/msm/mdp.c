@@ -52,7 +52,7 @@
 #include "mipi_samsung_octa.h"
 
 uint32 mdp4_extn_disp;
-
+u32 mdp_iommu_max_map_size;
 static struct clk *mdp_clk;
 static struct clk *mdp_pclk;
 static struct clk *mdp_lut_clk;
@@ -659,6 +659,7 @@ int mdp_preset_lut_update_lcdc(struct fb_cmap *cmap, uint32_t *internal_lut)
 
 	return 0;
 }
+EXPORT_SYMBOL(mdp_preset_lut_update_lcdc);
 #endif
 
 static void mdp_lut_enable(void)
@@ -2423,6 +2424,8 @@ static int mdp_on(struct platform_device *pdev)
 
 	mdp_pipe_ctrl(MDP_CMD_BLOCK, MDP_BLOCK_POWER_ON, FALSE);
 
+	if (mfd->index == 0)
+		mdp_iommu_max_map_size = mfd->max_map_size;
 	ret = panel_next_on(pdev);
 	mdp_pipe_ctrl(MDP_CMD_BLOCK, MDP_BLOCK_POWER_OFF, FALSE);
 

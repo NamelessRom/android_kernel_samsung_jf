@@ -92,7 +92,6 @@ unsigned int batt_ctrl_disable_chrg;
 
 extern void set_batt_mhz_info(unsigned int batt_lvl_low, unsigned int batt_lvl_high, unsigned int mhz_lvl_low, unsigned int mhz_lvl_high, unsigned int disable_chrg);
 extern unsigned int get_batt_level(void);
-extern void set_max_gpuclk_so(unsigned long val);
 
 //Global placeholder for CPU policies
 struct cpufreq_policy trmlpolicy[10];
@@ -2811,12 +2810,6 @@ static void cpufreq_gov_resume(void)
 		pr_alert("cpufreq_gov_resume_freq: %u\n", value);
 	}
 	
-	//GPU Control
-	if  (!call_in_progress || Ldisable_som_call_in_progress == 0)
-	{
-		if (Lscreen_off_GPU_mhz > 0)
-			set_max_gpuclk_so(0);
-	}
 }
 
 static void cpufreq_gov_suspend(void)
@@ -2872,9 +2865,6 @@ static void cpufreq_gov_suspend(void)
 			}
 		}
 	}
-	//GPU Control
-	if (Lscreen_off_GPU_mhz > 0 && (!call_in_progress || Ldisable_som_call_in_progress == 0))
-		set_max_gpuclk_so(Lscreen_off_GPU_mhz);
 }
 
 void set_call_in_progress(bool state)

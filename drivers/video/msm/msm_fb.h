@@ -197,14 +197,8 @@ struct msm_fb_data_type {
 	void *cpu_pm_hdl;
 	u32 acq_fen_cnt;
 	struct sync_fence *acq_fen[MDP_MAX_FENCE_FD];
-	int cur_rel_fen_fd;
-	struct sync_pt *cur_rel_sync_pt;
-	struct sync_fence *cur_rel_fence;
-	struct sync_fence *last_rel_fence;
 	struct sw_sync_timeline *timeline;
 	int timeline_value;
-	u32 last_acq_fen_cnt;
-	struct sync_fence *last_acq_fen[MDP_MAX_FENCE_FD];
 	struct mutex sync_mutex;
 	struct mutex queue_mutex;
 	struct completion commit_comp;
@@ -221,6 +215,7 @@ struct msm_fb_data_type {
 	unsigned char *copy_splash_phys;
 	uint32 sec_mapped;
 	uint32 sec_active;
+	uint32 max_map_size;
 };
 struct msm_fb_backup_type {
 	struct fb_info info;

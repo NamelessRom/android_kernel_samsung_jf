@@ -321,13 +321,13 @@ struct mdp_overlay_pp_params {
 	struct mdp_qseed_cfg qseed_cfg[2];
 };
 
-enum {
+enum {                    
 	BLEND_OP_NOT_DEFINED = 0,
-	BLEND_OP_OPAQUE,
-	BLEND_OP_PREMULTIPLIED,
-	BLEND_OP_COVERAGE,
-	BLEND_OP_MAX,
-};
+	BLEND_OP_OPAQUE,         
+	BLEND_OP_PREMULTIPLIED,  
+	BLEND_OP_COVERAGE,       
+	BLEND_OP_MAX,            
+};                        
 
 struct mdp_overlay {
 	struct msmfb_img src;
@@ -488,12 +488,19 @@ struct mdp_bl_scale_data {
 	uint32_t scale;
 };
 
+struct mdp_calib_config_data {
+	uint32_t ops;
+	uint32_t addr;
+	uint32_t data;
+};
+
 enum {
 	mdp_op_pcc_cfg,
 	mdp_op_csc_cfg,
 	mdp_op_lut_cfg,
 	mdp_op_qseed_cfg,
 	mdp_bl_scale_cfg,
+	mdp_op_calib_cfg,
 	mdp_op_max,
 };
 
@@ -505,6 +512,7 @@ struct msmfb_mdp_pp {
 		struct mdp_lut_cfg_data lut_cfg_data;
 		struct mdp_qseed_cfg_data qseed_cfg_data;
 		struct mdp_bl_scale_data bl_scale_data;
+		struct mdp_calib_config_data calib_cfg;
 	} data;
 };
 
@@ -536,13 +544,7 @@ struct mdp_buf_sync {
 	uint32_t acq_fen_fd_cnt;
 	int *acq_fen_fd;
 	int *rel_fen_fd;
-};
-
-struct mdp_buf_fence {
-	uint32_t flags;
-	uint32_t acq_fen_fd_cnt;
-	int acq_fen_fd[MDP_MAX_FENCE_FD];
-	int rel_fen_fd[MDP_MAX_FENCE_FD];
+	int *retire_fen_fd;
 };
 
 #define MDP_DISPLAY_COMMIT_OVERLAY 0x00000001
@@ -566,7 +568,7 @@ struct mdp_mixer_info {
 	int z_order;
 };
 
-#define MAX_PIPE_PER_MIXER  5
+#define MAX_PIPE_PER_MIXER 5 //ss fix 4-> 5.  this value should be (MDP4_MIXER_STAGE_MAX-MDP4_MIXER_STAGE_BASE)
 
 struct msmfb_mixer_info_req {
 	int mixer_num;

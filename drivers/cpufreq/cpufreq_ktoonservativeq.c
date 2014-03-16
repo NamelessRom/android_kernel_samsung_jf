@@ -31,7 +31,6 @@
 
 #define DEF_CPU_DOWN_BLOCK_CYCLES		(11)
 #define DEF_BOOST_CPU				(1134000)
-#define DEF_BOOST_GPU				(450)
 #define DEF_BOOST_HOLD_CYCLES			(22)
 #define DEF_DISABLE_HOTPLUGGING			(0)
 #define CPUS_AVAILABLE				num_possible_cpus()
@@ -75,7 +74,6 @@ extern void ktoonservative_is_active(bool val);
 extern void ktoonservative_is_activebd(bool val);
 extern void ktoonservative_is_activepk(bool val);
 extern void ktoonservative_is_activehk(bool val);
-extern void boost_the_gpu(unsigned int freq, bool getfreq);
 
 extern void apenable_auto_hotplug(bool state);
 extern bool apget_enable_auto_hotplug(void);
@@ -155,7 +153,6 @@ static struct dbs_tuners {
 	unsigned int lockout_2nd_core_hotplug;
 	unsigned int lockout_3rd_core_hotplug;
 	unsigned int lockout_4th_core_hotplug;
-	unsigned int touch_boost_gpu;
 	unsigned int sync_extra_cores;
 	unsigned int boost_hold_cycles;
 	unsigned int disable_hotplugging;
@@ -189,7 +186,6 @@ static struct dbs_tuners {
 	.lockout_2nd_core_hotplug = 0,
 	.lockout_3rd_core_hotplug = 0,
 	.lockout_4th_core_hotplug = 0,
-	.touch_boost_gpu = DEF_BOOST_GPU,
 	.sync_extra_cores = 0,
 	.boost_hold_cycles = DEF_BOOST_HOLD_CYCLES,
 	.disable_hotplugging = DEF_DISABLE_HOTPLUGGING,
@@ -380,7 +376,6 @@ show_one(boost_4th_core_on_button, boost_4th_core_on_button);
 show_one(lockout_2nd_core_hotplug, lockout_2nd_core_hotplug);
 show_one(lockout_3rd_core_hotplug, lockout_3rd_core_hotplug);
 show_one(lockout_4th_core_hotplug, lockout_4th_core_hotplug);
-show_one(touch_boost_gpu, touch_boost_gpu);
 show_one(boost_hold_cycles, boost_hold_cycles);
 show_one(disable_hotplugging, disable_hotplugging);
 show_one(disable_hotplugging_chrg, disable_hotplugging_chrg);
@@ -809,23 +804,6 @@ static ssize_t store_lockout_4th_core_hotplug(struct kobject *a, struct attribut
 	return count;
 }
 
-static ssize_t store_touch_boost_gpu(struct kobject *a, struct attribute *b,
-				    const char *buf, size_t count)
-{
-	unsigned int input;
-	int ret;
-	ret = sscanf(buf, "%u", &input);
-
-	if (input != 128 && input != 200 && input != 320 && input != 450 && input != 504 && input != 545 && input != 600 && input != 627)
-		input = 0;
-	
-	if (input == 0)
-		boost_the_gpu(dbs_tuners_ins.touch_boost_gpu, false);
-		
-	dbs_tuners_ins.touch_boost_gpu = input;
-	return count;
-}
-
 static ssize_t store_boost_hold_cycles(struct kobject *a, struct attribute *b,
 				    const char *buf, size_t count)
 {
@@ -1058,7 +1036,6 @@ define_one_global_rw(boost_4th_core_on_button);
 define_one_global_rw(lockout_2nd_core_hotplug);
 define_one_global_rw(lockout_3rd_core_hotplug);
 define_one_global_rw(lockout_4th_core_hotplug);
-define_one_global_rw(touch_boost_gpu);
 define_one_global_rw(sync_extra_cores);
 define_one_global_rw(boost_hold_cycles);
 define_one_global_rw(disable_hotplugging);
@@ -1097,7 +1074,6 @@ static struct attribute *dbs_attributes[] = {
 	&lockout_2nd_core_hotplug.attr,
 	&lockout_3rd_core_hotplug.attr,
 	&lockout_4th_core_hotplug.attr,
-	&touch_boost_gpu.attr,
 	&sync_extra_cores.attr,
 	&boost_hold_cycles.attr,
 	&disable_hotplugging.attr,
@@ -1144,7 +1120,6 @@ static void dbs_check_cpu(struct cpu_dbs_info_s *this_dbs_info)
 				for (cpu = 0; cpu < CPUS_AVAILABLE; cpu++)
 					kt_freq_control[cpu] = 0;
 			}
-			boost_the_gpu(dbs_tuners_ins.touch_boost_gpu, false);
 			goto boostcomplete;
 		}
 		boost_hold_cycles_cnt++;
@@ -1419,7 +1394,6 @@ void screen_is_on_relay_kt(bool state)
 	}
 	else
 	{
-		boost_the_gpu(dbs_tuners_ins.touch_boost_gpu, false);
 		stored_sampling_rate = dbs_tuners_ins.sampling_rate;
 		dbs_tuners_ins.sampling_rate = dbs_tuners_ins.sampling_rate_screen_off;
 		//pr_alert("SCREEN_IS_ON2: %d-%d\n", dbs_tuners_ins.sampling_rate, stored_sampling_rate);
@@ -1432,13 +1406,6 @@ void boostpulse_relay_kt(void)
 	if (!boostpulse_relayf)
 	{
 		bool got_boost_core = false;
-
-		if (dbs_tuners_ins.touch_boost_gpu > 0 && screen_is_on)
-		{
-			boost_the_gpu(dbs_tuners_ins.touch_boost_gpu, true);
-			boostpulse_relayf = true;
-			boost_hold_cycles_cnt = 0;
-		}
 		
 		if (dbs_tuners_ins.touch_boost_2nd_core != 0 || dbs_tuners_ins.touch_boost_3rd_core != 0 || dbs_tuners_ins.touch_boost_4th_core != 0 || dbs_tuners_ins.touch_boost_cpu != 0) // && dbs_tuners_ins.touch_boost_gpu == 0)
 		{
@@ -1629,8 +1596,6 @@ static int cpufreq_governor_dbs(struct cpufreq_policy *policy,
     		//kt_is_active_benabled_power(false);
 		
 		apenable_auto_hotplug(prev_apenable);
-		
-		boost_the_gpu(dbs_tuners_ins.touch_boost_gpu, false);
 		
 		dbs_timer_exit(this_dbs_info);
 
