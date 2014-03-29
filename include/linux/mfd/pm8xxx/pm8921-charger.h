@@ -1,4 +1,4 @@
-/* Copyright (c) 2011-2012, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2011-2013, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -22,6 +22,9 @@ struct pm8xxx_charger_core_data {
 	unsigned int	vbat_channel;
 	unsigned int	batt_temp_channel;
 	unsigned int	batt_id_channel;
+	/* OPPO 2012-08-06 chendx Add begin for chg voltage */
+	unsigned int	chg_voltage_channel;
+	/* OPPO 2012-08-06 chendx Add end */
 };
 
 enum pm8921_chg_cold_thr {
@@ -56,6 +59,65 @@ enum pm8921_chg_led_src_config {
 	LED_SRC_BYPASS,
 };
 
+/* OPPO 2012-08-07 chendx Add begin for BTM */
+typedef enum   
+{
+    /*! Battery is cold               */
+    CV_BATTERY_TEMP_REGION__COLD,
+    /*! Battery is little cold               */
+    CV_BATTERY_TEMP_REGION_LITTLE__COLD,
+    /*! Battery is cool               */
+    CV_BATTERY_TEMP_REGION__COOL,
+    /*! Battery is normal             */
+    CV_BATTERY_TEMP_REGION__NORMAL,
+    /*! Battery is warm               */
+    CV_BATTERY_TEMP_REGION__WARM,
+    /*! Battery is hot                */
+    CV_BATTERY_TEMP_REGION__HOT,
+    /*! Invalid battery temp region   */
+    CV_BATTERY_TEMP_REGION__INVALID,
+}chg_cv_battery_temp_region_type;
+/* OPPO 2012-08-07 chendx Add end */
+
+/* OPPO 2012-08-15 chendx Add begin for charger uovp */
+/*
+ * This enum contains defintions of the charger hardware status
+ */
+/*! \enum chg_charger_status
+ *	\brief This enum contains defintions of the charger hardware status
+ */
+typedef enum
+{
+	/* The charger is good		*/
+	CHARGER_STATUS_GOOD,
+	/* The charger is bad		*/
+	CHARGER_STATUS_BAD,
+	/* The charger is weakvoltage	*/
+	CHARGER_STATUS_WEAK,
+	/* The charger is overvoltage	*/
+	CHARGER_STATUS_OVER,
+	/* Invalid charger status.	*/
+	CHARGER_STATUS_INVALID
+}chg_charger_status;
+/*
+ *  This enum contains defintions of the battery status
+ */
+typedef enum
+{
+	/* The battery is good        */
+	BATTERY_STATUS_GOOD,
+	/* The battery is cold/hot    */
+	BATTERY_STATUS_BAD_TEMP,
+	/* The battery is bad         */
+	BATTERY_STATUS_BAD,
+	/* The battery is removed     */
+	BATTERY_STATUS_REMOVED,		
+	/* Invalid battery status.    */
+	BATTERY_STATUS_INVALID
+}chg_battery_status;
+
+/* OPPO 2012-08-15 chendx Add end */
+
 /**
  * struct pm8921_charger_platform_data -
  * @safety_time:	max charging time in minutes incl. fast and trkl
@@ -63,14 +125,21 @@ enum pm8921_chg_led_src_config {
  * @ttrkl_time:		max trckl charging time in minutes
  *			valid range 1 to 64 mins. PON default 15 min
  * @update_time:	how often the userland be updated of the charging (msec)
- * @alarm_voltage:	the voltage (mV) when lower battery alarm is triggered
+ * @alarm_low_mv:	the voltage (mV) when low battery alarm is triggered
+ * @alarm_high_mv:	the voltage (mV) when high battery alarm is triggered
  * @max_voltage:	the max voltage (mV) the battery should be charged up to
  * @min_voltage:	the voltage (mV) where charging method switches from
  *			trickle to fast. This is also the minimum voltage the
  *			system operates at
  * @uvd_thresh_voltage:	the USB falling UVD threshold (mV) (PM8917 only)
+ * @safe_current_ma:	The upper limit of current allowed to be pushed in
+ *			battery. This ends up writing in a one time
+ *			programmable register.
  * @resume_voltage_delta:	the (mV) drop to wait for before resume charging
  *				after the battery has been fully charged
+ * @resume_charge_percent:	the % SOC the charger will drop to after the
+ *				battery is fully charged before resuming
+ *				charging.
  * @term_current:	the charger current (mA) at which EOC happens
  * @cool_temp:		the temperature (degC) at which the battery is
  *			considered cool charging current and voltage is reduced.
@@ -83,6 +152,7 @@ enum pm8921_chg_led_src_config {
  *			area
  * @max_bat_chg_current:	Max charge current of the battery in mA
  *				Usually 70% of full charge capacity
+ * @usb_max_current:		Maximum USB current in mA
  * @cool_bat_chg_current:	chg current (mA) when the battery is cool
  * @warm_bat_chg_current:	chg current (mA)  when the battery is warm
  * @cool_bat_voltage:		chg voltage (mV) when the battery is cool
@@ -120,32 +190,60 @@ enum pm8921_chg_led_src_config {
  *			resistance of the pads, connectors, battery terminals
  *			and rsense.
  * @led_src_config:	Power source for anode of charger indicator LED.
+ * @btc_override:	disable the comparators for conifugrations where a
+ *			suitable voltages don't appear on vbatt therm line
+ *			for the charger to detect battery is either cold / hot.
+ * @btc_override_cold_degc:	Temperature in degCelcius when the battery is
+ *				deemed cold and charging never happens. Used
+ *				only if btc_override = 1
+ * @btc_override_hot_degc:	Temperature in degCelcius when the battery is
+ *				deemed hot and charging never happens. Used
+ *				only if btc_override = 1
+ * @btc_delay_ms:	Delay in milliseconds to monitor the battery temperature
+ *			while charging when btc_override = 1
+ * @btc_panic_if_cant_stop_chg:	flag to instruct the driver to panic if the
+ *				driver couldn't stop charging when battery
+ *				temperature is out of bounds. Used only if
+ *				btc_override = 1
+ * stop_chg_upon_expiry:	flag to indicate that the charger driver should
+ *				stop charging the battery when the safety timer
+ *				expires. If not set the charger driver will
+ *				restart charging upon expiry.
  */
 struct pm8921_charger_platform_data {
 	struct pm8xxx_charger_core_data	charger_cdata;
-	unsigned int			safety_time;
 	unsigned int			ttrkl_time;
 	unsigned int			update_time;
 	unsigned int			max_voltage;
 	unsigned int			min_voltage;
 	unsigned int			uvd_thresh_voltage;
-	unsigned int			alarm_voltage;
+/* OPPO 2012-08-07 chendx Add begin for BTM */
+	unsigned int			normal_resume_voltage_delta;
+	unsigned int			little_cold_bat_chg_current;
+	unsigned int			normal_dcp_chg_current;
+	unsigned int			normal_sdp_chg_current;
+	unsigned int			little_cold_bat_voltage;
+	unsigned int			normal_bat_voltage;
+/* OPPO 2012-08-07 chendx Add end */
+	unsigned int			safe_current_ma;
+	unsigned int			alarm_low_mv;
+	unsigned int			alarm_high_mv;
 	unsigned int			resume_voltage_delta;
+	int				resume_charge_percent;
 	unsigned int			term_current;
 	int				cool_temp;
 	int				warm_temp;
 	unsigned int			temp_check_period;
 	unsigned int			max_bat_chg_current;
+	unsigned int			usb_max_current;
 	unsigned int			cool_bat_chg_current;
 	unsigned int			warm_bat_chg_current;
-	int				ext_batt_temp_monitor;
 	unsigned int			cool_bat_voltage;
 	unsigned int			warm_bat_voltage;
 	unsigned int			(*get_batt_capacity_percent) (void);
 	int64_t				batt_id_min;
 	int64_t				batt_id_max;
 	bool				keep_btm_on_suspend;
-	bool				dc_unplug_check;
 	bool				has_dc_supply;
 	int				trkl_voltage;
 	int				weak_voltage;
@@ -158,8 +256,24 @@ struct pm8921_charger_platform_data {
 	enum pm8921_chg_hot_thr		hot_thr;
 	int				rconn_mohm;
 	enum pm8921_chg_led_src_config	led_src_config;
-	int				eoc_check_soc;
-	bool				enable_tcxo_warmup_delay;
+	int				battery_less_hardware;
+	int				btc_override;
+	int				btc_override_cold_degc;
+	int				btc_override_hot_degc;
+	int				btc_delay_ms;
+	int				btc_panic_if_cant_stop_chg;
+	int				stop_chg_upon_expiry;
+		/* OPPO 2012-08-06 chendx Add begin for rsense init */
+	unsigned int			r_sense;
+	/* OPPO 2012-08-06 chendx Add end */
+	/* OPPO 2012-08-13 chendx Add begin for reason */
+    int mhl_chg_current;
+	int nonstanard_mhl_chg_current;
+	/* OPPO 2012-08-13 chendx Add end */
+	bool				disable_chg_rmvl_wrkarnd;
+/* OPPO 2013-08-07 zhenwx Add begin for sometimes power key or insert USB no response */	
+	bool		enable_tcxo_warmup_delay;
+/* OPPO 2013-08-07 zhenwx Add end */	
 };
 
 enum pm8921_charger_source {
@@ -167,8 +281,12 @@ enum pm8921_charger_source {
 	PM8921_CHG_SRC_USB,
 	PM8921_CHG_SRC_DC,
 };
+/* OPPO 2012-08-13 chendx Add begin for reason */
+int mhl_stanard_charge(void);
 
-#if defined(CONFIG_PM8921_CHARGER) || defined(CONFIG_PM8921_CHARGER_MODULE)
+/* OPPO 2012-08-13 chendx Add end */
+
+#if defined(CONFIG_PM8921_CHARGER_OPPO) || defined(CONFIG_PM8921_CHARGER_MODULE_OPPO)
 void pm8921_charger_vbus_draw(unsigned int mA);
 int pm8921_charger_register_vbus_sn(void (*callback)(int));
 void pm8921_charger_unregister_vbus_sn(void (*callback)(int));
@@ -288,15 +406,6 @@ int pm8921_usb_ovp_set_hystersis(enum pm8921_usb_debounce_time ms);
  *
  */
 int pm8921_usb_ovp_disable(int disable);
-#ifdef CONFIG_WIRELESS_CHARGER
-int set_wireless_power_supply_control(int value);
-#endif
-
-int pm8921_set_ext_battery_health(int health, int i_limit);
-int pm8921_get_batt_state(void);
-int pm8921_force_start_charging(void);
-int pm8921_get_batt_health(void);
-
 /**
  * pm8921_is_batfet_closed - battery fet status
  *
@@ -314,10 +423,6 @@ static inline int pm8921_charger_register_vbus_sn(void (*callback)(int))
 }
 static inline void pm8921_charger_unregister_vbus_sn(void (*callback)(int))
 {
-}
-static inline int pm8921_charger_enable(bool enable)
-{
-	return -ENXIO;
 }
 static inline int pm8921_is_usb_chg_plugged_in(void)
 {
