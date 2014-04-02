@@ -27,6 +27,7 @@
 #include <linux/i2c.h>
 #include <linux/irq.h>
 #include <linux/interrupt.h>
+#include <linux/irq.h>
 #include <linux/platform_device.h>
 #include <linux/slab.h>
 #include <linux/delay.h>
@@ -40,18 +41,13 @@
 #include <linux/clk.h>
 #include <linux/firmware.h>
 #include <linux/barcode_emul.h>
+#include <linux/regulator/consumer.h>
+#include <linux/of_gpio.h>
 #if defined(CONFIG_IR_REMOCON_FPGA)
 #include <linux/ir_remote_con.h>
 #endif
-#define USING_CONSUMERIR_SERVICE 1// Allows ConsumerIR service
-#ifdef USING_CONSUMERIR_SERVICE 
-#include <linux/miscdevice.h>
-#endif
 #include "barcode_emul_ice4.h"
 #include <linux/err.h>
-#if defined(CONFIG_MACH_JF_DCM)
-#include <mach/apq8064-gpio.h>
-#endif
 
 #if defined(TEST_DEBUG)
 #define pr_barcode	pr_emerg
@@ -69,6 +65,8 @@
 
 #define BARCODE_I2C_ADDR	0x6C
 #define FIRMWARE_MAX_RETRY	2
+#define GPIO_FPGA_MAIN_CLK 26
+#define MSM_SEC_FPGA_I2C_BUS_ID 13
 
 #if defined(CONFIG_IR_REMOCON_FPGA)
 #define IRDA_I2C_ADDR		0x50
@@ -104,79 +102,194 @@ static int ack_number;
 static int count_number;
 #endif
 static struct barcode_emul_platform_data *g_pdata;
-#ifdef USING_CONSUMERIR_SERVICE
-static struct barcode_emul_data *g_data;
-#endif
+static int Is_clk_enabled;
+static int enable_counte;
 static int Is_beaming;
 static struct mutex		en_mutex;
 static struct i2c_client *g_client;
 static int gpiox_state;
 static bool fw_dl_complete;
-static int enable_count;
 
-#if defined(CONFIG_MACH_JF_DCM)
-static void fpga_enable(int enable, int bdelay)
-{
-	static int Is_clk_enabled;
-	if (enable) {
-		mutex_lock(&en_mutex);
-		if (!Is_clk_enabled) {
-			if (g_pdata->clock_en)
-				g_pdata->clock_en(1);
-			gpio_set_value(g_pdata->rst_n, GPIO_LEVEL_HIGH);
-			if(bdelay)
-				usleep_range(1000, 2000);
-			Is_clk_enabled = 1;
-		}
-	} else {
-		if (Is_clk_enabled && !Is_beaming && !g_pdata->get_fpga_felica_flag()) {
+#if defined(CONFIG_SEC_MELIUSCA_PROJECT)
+static struct regulator *barcode_l20_2p95=NULL;
 
-			if(bdelay)
-				usleep_range(20000, 25000);
-			else
-				usleep_range(1000, 2000);
-			
-			gpio_set_value(g_pdata->rst_n, GPIO_LEVEL_LOW);
-			if (g_pdata->clock_en)
-				g_pdata->clock_en(0);
-			Is_clk_enabled = 0;
-		}
-		mutex_unlock(&en_mutex);
-	}
-}
-#else
-static void fpga_enable(int enable)
+static int bc_poweron(struct device dev)
 {
-	static int Is_clk_enabled;
-	if (enable) {
-		if (!Is_clk_enabled && (enable_count == 0)) {
-			mutex_lock(&en_mutex);
-			if (g_pdata->clock_en)
-				g_pdata->clock_en(1);
-			gpio_set_value(g_pdata->rst_n, GPIO_LEVEL_HIGH);
-			usleep_range(1000, 2000);
-			Is_clk_enabled = 1;
-		}
-		enable_count++;
-	} else {
-		if (Is_clk_enabled && !Is_beaming && (enable_count == 1)) {
-			usleep_range(20000, 25000);
-			gpio_set_value(g_pdata->rst_n, GPIO_LEVEL_LOW);
-			if (g_pdata->clock_en)
-				g_pdata->clock_en(0);
-			Is_clk_enabled = 0;
-			mutex_unlock(&en_mutex);
-		}
-		if(enable_count<0){
-			pr_barcode("%s enable_count ERR!= %d\n",__func__,enable_count);
-			enable_count = 0;
-		}else{
-			enable_count--;
-		}
-		
+	int ret;
+	printk(KERN_ERR "%s\n",__func__);
+	barcode_l20_2p95 = regulator_get(NULL, "8941_l20");
+	if (IS_ERR(barcode_l20_2p95)) {
+        	pr_err("%s: could not get vdda vreg, rc=%ld\n",
+                	__func__, PTR_ERR(barcode_l20_2p95));
+		return PTR_ERR(barcode_l20_2p95);
 	}
+	ret = regulator_set_voltage(barcode_l20_2p95,
+		2950000, 2950000);
+       if (ret)
+               pr_err("%s: error vreg_l20 set voltage ret=%d\n",
+                       __func__, ret);
+
+       ret = regulator_enable(barcode_l20_2p95);
+        if (ret)
+                pr_err("%s: error l20 enabling regulator\n", __func__);
+	return 0;
 }
 #endif
+#if !defined(CONFIG_SEC_MELIUSCA_PROJECT)
+static int check_cdone_state(void)
+{
+	if (gpio_get_value(g_pdata->cdone) != 1) {
+		pr_err("%s: cdone fail & set gpio!\n", __func__);
+		gpio_tlmm_config(GPIO_CFG(g_pdata->cdone, 0,
+			GPIO_CFG_INPUT,	GPIO_CFG_NO_PULL, GPIO_CFG_2MA), 1);
+		udelay(100);
+	}
+	return 0;
+}
+#endif
+#if defined(CONFIG_SEC_MELIUSCA_PROJECT)
+static void irda_wake_en(bool onoff)
+{
+	gpio_direction_output(g_pdata->rst_n, onoff);
+	printk(KERN_ERR "%s: %d\n", __func__, onoff);
+}
+#else
+static void irda_wake_en(bool onoff)
+{
+	gpio_direction_output(g_pdata->irda_wake, onoff);
+	printk(KERN_ERR "%s: %d\n", __func__, onoff);
+}
+#endif
+static int ice4_clock_en(int onoff)
+{
+	static struct clk *fpga_main_src_clk;
+	static struct clk *fpga_main_clk;
+	if (!fpga_main_src_clk){
+		fpga_main_src_clk = clk_get(NULL, "cam_gp0_src_clk");
+	}
+	if (IS_ERR(fpga_main_src_clk)) {
+   		pr_err( "%s: unable to get fpga_main_src_clk\n", __func__);
+   	}
+
+	if (!fpga_main_clk){
+		fpga_main_clk = clk_get(NULL, "cam_gp0_clk");
+	}
+	if (IS_ERR(fpga_main_clk)) {
+   		pr_err( "%s: unable to get fpga_main_clk\n", __func__);
+   	}
+
+	if (onoff) {
+		clk_set_rate(fpga_main_src_clk, 24000000);
+		clk_prepare_enable(fpga_main_clk);
+	} else {
+		clk_disable_unprepare(fpga_main_clk);
+		clk_put(fpga_main_src_clk);
+		clk_put(fpga_main_clk);
+		fpga_main_src_clk = NULL;
+		fpga_main_clk = NULL;
+	}	
+	return 0;
+}
+
+
+
+static void fpga_enable(int enable)
+{
+	int ret;
+	printk(KERN_ERR "%s start %d,%d,%d,%d\n",__func__,enable,Is_clk_enabled,enable_counte,Is_beaming);
+	if (enable) {
+		enable_counte++;
+		if (!Is_clk_enabled && (enable_counte ==1)) {
+			mutex_lock(&en_mutex);
+			ret = ice4_clock_en(1);
+			gpio_set_value(g_pdata->rst_n, GPIO_LEVEL_HIGH);
+			usleep_range(1000, 2000);
+			printk(KERN_ERR "%s enable usleep end count =%d\n",__func__,enable_counte);
+			Is_clk_enabled = 1;
+		}
+	} else {
+		if (Is_clk_enabled && !Is_beaming && (enable_counte==1)) {
+			usleep_range(20000, 25000);
+			printk(KERN_ERR "%s disable usleep end count =%d\n",__func__,enable_counte);
+			if (enable_counte==1) {
+				Is_clk_enabled = 0;
+				gpio_set_value(g_pdata->rst_n, GPIO_LEVEL_LOW);
+				ret = ice4_clock_en(0);
+				mutex_unlock(&en_mutex);
+			}
+		}
+		if(enable_counte<0){
+			printk(KERN_ERR "%s enable_counte ERR!= %d\n",__func__,enable_counte);
+			enable_counte =0;
+		}else{
+			enable_counte--;
+		}
+	}
+	printk(KERN_ERR "%s end %d,%d,%d,%d\n",__func__,enable,Is_clk_enabled,enable_counte,Is_beaming);
+}
+
+#ifdef CONFIG_OF
+
+static int barcode_parse_dt(struct device *dev,
+			struct barcode_emul_platform_data *pdata)
+{
+	struct device_node *np = dev->of_node;
+
+	/* reset, irq gpio info */
+	pdata->cresetb = of_get_named_gpio_flags(np, "barcode,cresetb",
+				0, &pdata->cresetb_flag);
+	pdata->rst_n = of_get_named_gpio_flags(np, "barcode,reset_n",
+				0, &pdata->rst_n_flag);
+
+#if !defined(CONFIG_SEC_MELIUSCA_PROJECT)
+	pdata->cdone = of_get_named_gpio_flags(np, "barcode,cdone",
+				0, &pdata->cdone_flag);
+	pdata->irda_wake = of_get_named_gpio(np, "barcode,irda_en", 0);
+#endif
+	pdata->spi_clk =of_get_named_gpio_flags(np, "barcode,scl-gpio",
+				0, &pdata->spi_clk_flag);		
+	pdata->spi_si =of_get_named_gpio_flags(np, "barcode,sda-gpio",
+				0, &pdata->spi_si_flag);
+	pdata->irda_irq =of_get_named_gpio_flags(np, "barcode,irq-gpio",
+				0, &pdata->irda_irq_flag);
+
+	return 0;
+}
+#else
+static int barcode_parse_dt(struct device *dev,
+			struct cypress_touchkey_platform_data *pdata)
+{
+	return -ENODEV;
+}
+#endif
+
+
+static void barcode_gpio_config(void)
+{
+	pr_info("%s\n", __func__);
+	gpio_tlmm_config(GPIO_CFG(g_pdata->spi_si, 0,
+		GPIO_CFG_OUTPUT, GPIO_CFG_NO_PULL, GPIO_CFG_2MA), 1);
+	gpio_tlmm_config(GPIO_CFG(g_pdata->spi_clk, 0,
+		GPIO_CFG_OUTPUT,	GPIO_CFG_NO_PULL, GPIO_CFG_2MA), 1);
+#if !defined(CONFIG_SEC_MELIUSCA_PROJECT)
+	gpio_tlmm_config(GPIO_CFG(g_pdata->cdone, 0,
+		GPIO_CFG_INPUT,	GPIO_CFG_NO_PULL, GPIO_CFG_2MA), 1);
+
+	gpio_request(g_pdata->irda_wake, "irda_en");
+	gpio_direction_output(g_pdata->irda_wake,0);
+#endif
+	gpio_request(g_pdata->cresetb, "irda_creset");
+	gpio_direction_output(g_pdata->cresetb, 0);
+
+	gpio_request(g_pdata->rst_n, "irda_rst_n");
+	gpio_direction_output(g_pdata->rst_n, 0);
+
+	gpio_request(g_pdata->irda_irq, "irda_irq");
+	gpio_direction_input(g_pdata->irda_irq);
+	
+	gpio_tlmm_config(GPIO_CFG(GPIO_FPGA_MAIN_CLK, \
+		6, GPIO_CFG_OUTPUT, GPIO_CFG_PULL_DOWN, GPIO_CFG_2MA), GPIO_CFG_ENABLE);	
+}
 
 /*
  * Send barcode emulator firmware data thougth spi communication
@@ -223,12 +336,7 @@ static int barcode_fpga_fimrware_update_start(const u8 *data, int len)
 	int retry = FIRMWARE_MAX_RETRY;
 	pr_barcode("%s\n", __func__);
 
-#if defined(CONFIG_MACH_JF_DCM)
-	fpga_enable(1, 1);
-#else
 	fpga_enable(1);
-#endif
-
 	do {
 		gpio_set_value(g_pdata->rst_n, GPIO_LEVEL_LOW);
 		gpio_set_value(g_pdata->cresetb, GPIO_LEVEL_LOW);
@@ -236,13 +344,14 @@ static int barcode_fpga_fimrware_update_start(const u8 *data, int len)
 
 		gpio_set_value(g_pdata->cresetb, GPIO_LEVEL_HIGH);
 		usleep_range(1000, 1300);
-
+#if !defined(CONFIG_SEC_MELIUSCA_PROJECT)
 		if (gpio_get_value(g_pdata->cdone))
 			pr_err("%s cdone HIGH before firmware download",
 				__func__);
+#endif
 		barcode_send_firmware_data(data, len);
 		usleep_range(50, 70);
-
+#if !defined(CONFIG_SEC_MELIUSCA_PROJECT)
 		if (gpio_get_value(g_pdata->cdone)) {
 			udelay(5);
 			pr_barcode("FPGA firmware update success\n");
@@ -255,12 +364,14 @@ static int barcode_fpga_fimrware_update_start(const u8 *data, int len)
 			else
 				pr_err("FPGA FIRMWARE_MAX_RETRY reached");
 		}
-	} while (retry);
-#if defined(CONFIG_MACH_JF_DCM)
-	fpga_enable(0, 1);
 #else
-	fpga_enable(0);
+		udelay(5);
+		pr_barcode("FPGA firmware update success\n");
+		fw_dl_complete = true;
+		break;
 #endif
+	} while (retry);
+	fpga_enable(0);
 	return 0;
 }
 
@@ -279,6 +390,13 @@ void ice4_fpga_firmware_update(void)
 		barcode_fpga_fimrware_update_start(spiword,
 						sizeof(spiword));
 	//verification with dummy gpio
+	gpio_tlmm_config(GPIO_CFG(g_pdata->spi_si, 3,
+		GPIO_CFG_OUTPUT, GPIO_CFG_NO_PULL, GPIO_CFG_2MA), 1);
+	gpio_tlmm_config(GPIO_CFG(g_pdata->spi_clk, 3,
+		GPIO_CFG_OUTPUT, GPIO_CFG_NO_PULL, GPIO_CFG_2MA), 1);
+
+	usleep_range(10000, 12000);
+	
 	ice_gpiox_get(1);
 }
 
@@ -290,18 +408,14 @@ static ssize_t barcode_emul_store(struct device *dev,
 	struct barcode_emul_data *data = dev_get_drvdata(dev);
 	struct i2c_client *client = data->client;
 	pr_barcode("%s start\n", __func__);
-
+#if !defined(CONFIG_SEC_MELIUSCA_PROJECT)
+	check_cdone_state();
 	if (gpio_get_value(g_pdata->cdone) != 1) {
 		pr_err("%s: cdone fail !!\n", __func__);
 		return 1;
 	}
-
-#if defined(CONFIG_MACH_JF_DCM)
-	fpga_enable(1, 1);
-#else
-	fpga_enable(1);
 #endif
-
+	fpga_enable(1);
 
 	client->addr = BARCODE_I2C_ADDR;
 	ret = i2c_master_send(client, buf, size);
@@ -312,7 +426,6 @@ static ssize_t barcode_emul_store(struct device *dev,
 			pr_err("%s: i2c err2 %d\n", __func__, ret);
 	}
 	pr_barcode("%s complete\n", __func__);
-
 	if ((buf[0] == 0xFF) && (buf[1] != STOP_BEAMING)) {
 		pr_barcode("%s BEAMING START\n", __func__);
 		Is_beaming = BEAMING_ON;
@@ -321,11 +434,7 @@ static ssize_t barcode_emul_store(struct device *dev,
 		Is_beaming = BEAMING_OFF;
 	}
 
-#if defined(CONFIG_MACH_JF_DCM)
-	fpga_enable(0, 1);
-#else
 	fpga_enable(0);
-#endif
 
 	return size;
 }
@@ -382,28 +491,15 @@ static int barcode_emul_read(struct i2c_client *client, u16 addr,
 	msg[1].len   = length;
 	msg[1].buf   = (u8 *) value;
 
-#if defined(CONFIG_MACH_JF_DCM)
-	fpga_enable(1, 1);
-#else
 	fpga_enable(1);
-#endif
-
 
 	ret = i2c_transfer(client->adapter, msg, 2);
 	if  (ret == 2) {
-#if defined(CONFIG_MACH_JF_DCM)
-		fpga_enable(0, 1);
-#else
 		fpga_enable(0);
-#endif
 		return 0;
 	} else {
 		pr_barcode("%s: err1 %d\n", __func__, ret);
-#if defined(CONFIG_MACH_JF_DCM)
-		fpga_enable(0, 1);
-#else
 		fpga_enable(0);
-#endif
 		return -EIO;
 	}
 }
@@ -423,17 +519,14 @@ static ssize_t barcode_emul_test_store(struct device *dev,
 			0x0A, 0xA8, 0xD1, 0xA3, 0x46, 0xC5, 0xDA, 0xFF};
 
 	client->addr = BARCODE_I2C_ADDR;
+#if !defined(CONFIG_SEC_MELIUSCA_PROJECT)
+	check_cdone_state();
 	if (gpio_get_value(g_pdata->cdone) != 1) {
 		pr_err("%s: cdone fail !!\n", __func__);
 		return 1;
 	}
-
-#if defined(CONFIG_MACH_JF_DCM)
-	fpga_enable(1, 1);
-#else
-	fpga_enable(1);
 #endif
-
+	fpga_enable(1);
 
 	if (buf[0] == LOOP_BACK) {
 		for (i = 0; i < size; i++)
@@ -598,12 +691,8 @@ static ssize_t barcode_emul_test_store(struct device *dev,
 			if (ret < 0)
 				pr_err("%s: err2 %d\n", __func__, ret);
 		}
-#if defined(CONFIG_MACH_JF_DCM)
-		fpga_enable(0, 1);
-#else
-		fpga_enable(0);
-#endif
 
+	fpga_enable(0);
 	}
 	return size;
 }
@@ -627,8 +716,9 @@ static ssize_t barcode_ver_check_show(struct device *dev,
 	barcode_emul_read(data->client, FW_VER_ADDR, 1, &fw_ver);
 	fw_ver = (fw_ver >> 5) & 0x7;
 
-	return sprintf(buf, "%d\n", fw_ver+14);
+	return snprintf(buf, sizeof(buf), "%d\n", fw_ver+14);
 }
+
 static DEVICE_ATTR(barcode_ver_check, 0664, barcode_ver_check_show, NULL);
 
 static ssize_t barcode_led_status_show(struct device *dev,
@@ -639,7 +729,7 @@ static ssize_t barcode_led_status_show(struct device *dev,
 	u8 status;
 	barcode_emul_read(data->client, BEAM_STATUS_ADDR, 1, &status);
 	status = status & 0x1;
-	return sprintf(buf, "%d\n", status);
+	return snprintf(buf, sizeof(buf), "%d\n", status);
 }
 static DEVICE_ATTR(barcode_led_status, 0664, barcode_led_status_show, NULL);
 
@@ -671,6 +761,7 @@ static void ir_remocon_work(struct barcode_emul_data *ir_data, int count)
 
 	struct barcode_emul_data *data = ir_data;
 	struct i2c_client *client = data->client;
+
 	int buf_size = count+2;
 	int ret;
 	int sleep_timing;
@@ -678,23 +769,14 @@ static void ir_remocon_work(struct barcode_emul_data *ir_data, int count)
 	int emission_time;
 	int ack_pin_onoff;
 
-	/* Put code here to handle the extra bytes from CRC and repeat frame length */
-
 	if (count_number >= 100)
 		count_number = 0;
 
 	count_number++;
 
 	pr_barcode("%s: total buf_size: %d\n", __func__, buf_size);
-
-	if (g_pdata->ir_led_poweron)
-		g_pdata->ir_led_poweron(1);
-
-#if defined(CONFIG_MACH_JF_DCM)
-	fpga_enable(1, 1);
-#else
+	
 	fpga_enable(1);
-#endif
 
 	mutex_lock(&data->mutex);
 
@@ -753,12 +835,7 @@ static void ir_remocon_work(struct barcode_emul_data *ir_data, int count)
 				data->i2c_block_transfer.data[i]);
 	}
 */
-#ifdef USING_CONSUMERIR_SERVICE
-	data->count = 0;
-	data->length = 0;
-#else
 	data->count = 2;
-#endif
 
 	end_data = data->i2c_block_transfer.data[count-2] << 8
 		| data->i2c_block_transfer.data[count-1];
@@ -789,19 +866,15 @@ static void ir_remocon_work(struct barcode_emul_data *ir_data, int count)
 	}
 
 	ack_number += ack_pin_onoff;
-
+#ifndef USE_STOP_MODE
+	data->on_off = 0;
+	irda_wake_en(0);
+#endif
 	data->ir_freq = 0;
 	data->ir_sum = 0;
 
-#if defined(CONFIG_MACH_JF_DCM)
-	fpga_enable(0, 1);
-#else
 	fpga_enable(0);
-#endif
 
-
-	if (g_pdata->ir_led_poweron)
-		g_pdata->ir_led_poweron(0);
 }
 
 static ssize_t remocon_store(struct device *dev, struct device_attribute *attr,
@@ -817,9 +890,18 @@ static ssize_t remocon_store(struct device *dev, struct device_attribute *attr,
 		if (sscanf(buf++, "%u", &_data) == 1) {
 			if (_data == 0 || buf == '\0')
 				break;
-
 			if (data->count == 2) {
 				data->ir_freq = _data;
+				if (data->on_off) {
+					irda_wake_en(0);
+					usleep_range(200, 300);
+					irda_wake_en(1);
+					msleep(30);
+				} else {
+					irda_wake_en(1);
+					msleep(60);
+					data->on_off = 1;
+				}
 				data->i2c_block_transfer.data[2]
 								= _data >> 16;
 				data->i2c_block_transfer.data[3]
@@ -889,13 +971,11 @@ static int irda_read_device_info(struct barcode_emul_data *ir_data)
 	int ret;
 
 	pr_barcode("%s called\n", __func__);
+	irda_wake_en(1);
+	
+	msleep(60);
 
-#if defined(CONFIG_MACH_JF_DCM)
-	fpga_enable(1, 1);
-#else
 	fpga_enable(1);
-#endif
-
 
 	client->addr = IRDA_I2C_ADDR;
 	ret = i2c_master_recv(client, buf_ir_test, READ_LENGTH);
@@ -907,11 +987,11 @@ static int irda_read_device_info(struct barcode_emul_data *ir_data)
 			buf_ir_test[2], buf_ir_test[3]);
 	ret = data->dev_id = (buf_ir_test[2] << 8 | buf_ir_test[3]);
 
-#if defined(CONFIG_MACH_JF_DCM)
-	fpga_enable(0, 1);
-#else
+	irda_wake_en(0);	
+	
+	data->on_off = 0;
+
 	fpga_enable(0);
-#endif
 
 	return ret;
 }
@@ -959,11 +1039,13 @@ static ssize_t irda_test_store(struct device *dev,
 		0x00, 0x15, 0x00, 0x3F, 0x00, 0x15, 0x00, 0x3F,
 		0x00, 0x15, 0x00, 0x3F
 	};
-
+#if !defined(CONFIG_SEC_MELIUSCA_PROJECT)
+	check_cdone_state();
 	if (gpio_get_value(g_pdata->cdone) != 1) {
 		pr_err("%s: cdone fail !!\n", __func__);
 		return 1;
 	}
+#endif
 	pr_barcode("IRDA test code start\n");
 
 	/* change address for IRDA */
@@ -973,12 +1055,7 @@ static ssize_t irda_test_store(struct device *dev,
 	for (i = 0; i < IRDA_TEST_CODE_SIZE; i++)
 		i2c_block_transfer.data[i] = BSR_data[i];
 
-#if defined(CONFIG_MACH_JF_DCM)
-	fpga_enable(1, 1);
-#else
 	fpga_enable(1);
-#endif
-
 
 	/* sending data by I2C */
 	i2c_block_transfer.addr = IRDA_TEST_CODE_ADDR;
@@ -992,11 +1069,7 @@ static ssize_t irda_test_store(struct device *dev,
 			pr_err("%s: err2 %d\n", __func__, ret);
 	}
 
-#if defined(CONFIG_MACH_JF_DCM)
-	fpga_enable(0, 1);
-#else
 	fpga_enable(0);
-#endif
 
 	return size;
 }
@@ -1014,150 +1087,7 @@ static struct device_attribute ir_attrs[] = {
 	__ATTR(irda_test, S_IRUGO|S_IWUSR|S_IWGRP, irda_test_show, irda_test_store)
 };
 #endif
-/* start of IOCTL related implementation */
-// JINHO : Can we use only ioctl func?
-#ifdef USING_CONSUMERIR_SERVICE
-/* 
- * in barcode_emul_data data;
- * data.count = number of bytes to be transmitted without crc
- * data.length = number of integer elements inside a message for an operation
- * 				 this comes by IOCTL_SET_DATA
- * data.i2c_block_transfer.addr holds the 0x00 and
- * data.i2c_block_transfer.data[] holds the bytes to transfer.
- */
-static int ice4_open(struct inode *inode, struct file *file)
-{
-	int err = 0;
 
-	pr_barcode("called");
-	err = nonseekable_open(inode, file);
-	if (err)
-		return err;
-	file->private_data = g_data;
-	// impossible
-	return 0;
-}
-static int ice4_release(struct inode *inode, struct file *file)
-{
-//	struct barcode_emul_data *data = file->private_data;
-	pr_barcode("called");
-	return 0;
-}
-#define FLAG_SET        1
-#define FLAG_CLR        0
-static int pattern_flag_set = FLAG_CLR;
-static void store_pattern(struct barcode_emul_data **data, int pattern[], int length) {
-	int i = 0;
-	(*data)->i2c_block_transfer.addr    = 0x00;
-	// i2c_block_transfer.data[0] and data[1] to be set later in ir_remocon_work
-	(*data)->i2c_block_transfer.data[2] = (*data)->ir_freq >> 16;
-	(*data)->i2c_block_transfer.data[3] = ((*data)->ir_freq >> 8) & 0xFF;
-	(*data)->i2c_block_transfer.data[4] = (*data)->ir_freq & 0xFF;
-	(*data)->count = 5;
-	for (; i < length; i = i + 1) {
-		(*data)->ir_sum += pattern[i];
-		(*data)->i2c_block_transfer.data[2*i + 5] = pattern[i] >> 8;
-		(*data)->i2c_block_transfer.data[2*i + 6] = pattern[i] & 0xFF;
-		(*data)->count += 2;
-	}
-	pattern_flag_set = FLAG_SET;
-}
-static long ice4_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
-{
-//	void __user *argp = (void __user *) arg;
-	struct barcode_emul_data *data = file->private_data;
-	pr_barcode("barcode ioctl called");
-	switch (cmd) {
-		case IR_IOCTL_SET_FREQ:
-		{
-			int freq;
-			freq = (int)arg;
-			if(freq < 0) {
-				pr_barcode("Improper data for frequency\n");
-				return -EINVAL;
-			}
-			pr_barcode("SET_FREQ cmd %d\n", freq);
-			data->ir_freq = freq;
-			break;
-		}
-		case IR_IOCTL_SET_SIZE:
-		{
-			int size;
-			size = (int)arg;
-			if(size < 0) {	// Choose a better error bound checking value here
-				pr_barcode("Re-enter pattern size\n");
-				return -EINVAL;
-			}
-			pr_barcode("SET_SIZE cmd %d\n", size);
-			data->length = size;
-			break;
-		}
-		case IR_IOCTL_SET_DATA:
-		{
-			int *pattern;
-			if (data->ir_freq == 0) {
-				pr_barcode("ir_freq is NOT set\n");
-				return -EIO;
-			}
-			if (data->length == 0) {
-				pr_barcode("pattern size is NOT set\n");
-				return -EIO;
-			}
-			pattern = kmalloc(((data->length)*sizeof(int)), GFP_KERNEL);
-			if(!pattern)
-				return -ENOMEM;
-			if(copy_from_user(pattern, (int *)arg, (sizeof(int)*(data->length)))) {
-				pr_barcode("Re-enter the pattern array\n");
-				return -EINVAL;
-			}
-			pr_barcode("SET_DATA cmd\n");
-			pr_barcode("1st / 2nd value : %d, %d\n", pattern[0], pattern[1]);
-			/* get the whole data (address) change the input from integers to character byte storage */
-			store_pattern(&data, pattern, data->length);
-			kfree(pattern);
-			break;
-		}
-		case IR_IOCTL_START:
-		{
-			if (pattern_flag_set != FLAG_SET) {
-				pr_barcode("transmission pattern is NOT set\n");
-				return -EIO;
-			}
-			// Safe to call now and reset the pattern_flag_set;
-			pattern_flag_set = FLAG_CLR;
-			ir_remocon_work(data, data->count);
-			/* we can control it in "remocon_store" function and this function must not call "ir_remocon_work" */
-			break;
-		}
-		case IR_IOCTL_STOP:
-		{
-			/* RESERVED */
-			/* I think it is impossible in this version of firmware */
-			break;
-		}
-		default:
-		{
-			pr_barcode("Unknown CMD\n");
-			return -ENOTTY;
-		}
-	}
-	return 0;
-}
-//JINHO : also, we need file_operations stucture for misc device
-static const struct file_operations ice4_fops = {
-	.owner = THIS_MODULE,
-	.open = ice4_open,
-	.release = ice4_release,
-	.unlocked_ioctl = ice4_ioctl,
-};
-//JINHO : How can we select the proper number of device?
-static struct miscdevice ice4_device = {
-	.minor = MISC_DYNAMIC_MINOR,
-	.name = "ice4_dev",
-	.fops = &ice4_fops,
-};
-/* end of IOCTL related implementation information */
-#endif
 static int ice_gpio_get(struct gpio_chip *chip, unsigned offset)
 {
 	return ice_gpiox_get((unsigned)offset);
@@ -1189,38 +1119,17 @@ int ice_gpiox_get(int num)
 	if (g_pdata->fw_type == ICE_24M)
 		cmd = 0xFC | (num >> 3);
 	else
-		cmd = num >> 3;
+	cmd = num >> 3;
 
-#if defined(CONFIG_MACH_JF_DCM)
-	if(num == FPGA_GPIO_FELICA_HSEL || num == FPGA_GPIO_FELICA_PON)
-		fpga_enable(1, 0);	
-	else
-		fpga_enable(1, 1);
-#else
 	fpga_enable(1);
-#endif
-
 	ret = i2c_smbus_read_byte_data(g_client, cmd);
 	if (ret) {
-#if defined(CONFIG_MACH_JF_DCM)
-		fpga_enable(0, 1);
-		fpga_enable(1, 1);
-#else
 		fpga_enable(0);
 		fpga_enable(1);
-#endif
 		ret = i2c_smbus_read_byte_data(g_client, cmd);
 	}
 
-#if defined(CONFIG_MACH_JF_DCM)
-	if(num == FPGA_GPIO_FELICA_HSEL || num == FPGA_GPIO_FELICA_PON)
-		fpga_enable(0, 0);	
-	else
-		fpga_enable(0, 1);
-#else
 	fpga_enable(0);
-#endif
-
 	if (ret < 0) {
 		pr_err("%s i2c error : %d\n", __func__, ret);
 		return ret;
@@ -1248,7 +1157,7 @@ int ice_gpiox_set(int num, int val)
 	if (g_pdata->fw_type == ICE_24M)
 		cmd = 0xFC | (num >> 3);
 	else
-		cmd = num >> 3;
+	cmd = num >> 3;
 
 	if (val)
 		gpiox_state |= 1 << num;
@@ -1257,38 +1166,18 @@ int ice_gpiox_set(int num, int val)
 
 	pr_barcode("%s : num = %d , val = %d\n", __func__, num, val);
 
-#if defined(CONFIG_MACH_JF_DCM)
-	if(num == FPGA_GPIO_FELICA_HSEL || num == FPGA_GPIO_FELICA_PON)
-		fpga_enable(1, 0);	
-	else
-		fpga_enable(1, 1);
-#else
 	fpga_enable(1);
-#endif
 
 	ret = i2c_smbus_write_byte_data(g_client, cmd,
 			(num >> 3) ? (gpiox_state >> 8) : gpiox_state);
 	if (ret) {
-#if defined(CONFIG_MACH_JF_DCM)
-		fpga_enable(0, 1);
-		fpga_enable(1, 1);
-#else
 		fpga_enable(0);
 		fpga_enable(1);
-#endif
 		ret = i2c_smbus_write_byte_data(g_client, cmd,
 				(num >> 3) ? (gpiox_state >> 8) : gpiox_state);
 	}
 
-#if defined(CONFIG_MACH_JF_DCM)
-	if(num == FPGA_GPIO_FELICA_HSEL || num == FPGA_GPIO_FELICA_PON)
-		fpga_enable(0, 0);	
-	else
-		fpga_enable(0, 1);
-#else
 	fpga_enable(0);
-#endif
-
 	if (ret)
 		pr_err("%s i2c error : %d\n", __func__, ret);
 
@@ -1299,11 +1188,14 @@ EXPORT_SYMBOL(ice_gpiox_set);
 static void fw_work(struct work_struct *work)
 {
 	ice4_fpga_firmware_update();
-
+#if !defined(CONFIG_SEC_MELIUSCA_PROJECT)
+	check_cdone_state();
 	if (gpio_get_value(g_pdata->cdone) != 1) {
 		pr_err("%s: cdone fail !!\n", __func__);
 		return;
 	}
+#endif
+	Is_clk_enabled = 0;
 }
 
 static int __devinit barcode_emul_probe(struct i2c_client *client,
@@ -1314,26 +1206,37 @@ static int __devinit barcode_emul_probe(struct i2c_client *client,
 	struct barcode_emul_platform_data *pdata;
 	struct device *barcode_emul_dev;
 	int error;
+	
 #ifdef CONFIG_IR_REMOCON_FPGA
 	int i;
 #endif
+	enable_counte =0;
 	pr_barcode("%s probe!\n", __func__);
-	enable_count = 0;
-	pdata = client->dev.platform_data;
-	g_pdata = pdata;
-#ifdef CONFIG_IR_REMOCON_FPGA
-	g_pdata->ir_remote_init();
-#endif
-	if (g_pdata->gpioconfig) {
-		pr_barcode("%s setting gpio config.\n", __func__);
-		g_pdata->gpioconfig();
-	}
-
-	if (g_pdata->poweron)
-		g_pdata->poweron(1);
-
 	if (!i2c_check_functionality(adapter, I2C_FUNC_I2C))
 		return -EIO;
+
+	if (client->dev.of_node) {
+		pdata = devm_kzalloc(&client->dev,
+			sizeof(struct barcode_emul_platform_data),
+				GFP_KERNEL);
+		if (!pdata) {
+			dev_err(&client->dev, "Failed to allocate memory\n");
+			return -ENOMEM;
+		}
+		error = barcode_parse_dt(&client->dev, pdata);
+		if (error)
+			return error;
+	} else
+		pdata = client->dev.platform_data;
+	
+	pdata->fw_type = ICE_24M;
+	g_pdata = pdata;
+	pr_barcode("%s setting gpio config.\n", __func__);
+	barcode_gpio_config();	
+#if defined(CONFIG_SEC_MELIUSCA_PROJECT)
+	bc_poweron(client->dev);
+#endif
+	client->irq = gpio_to_irq(pdata->irda_irq);
 
 	data = kzalloc(sizeof(struct barcode_emul_data), GFP_KERNEL);
 	if (NULL == data) {
@@ -1341,30 +1244,17 @@ static int __devinit barcode_emul_probe(struct i2c_client *client,
 		error = -ENOMEM;
 		goto err_free_mem;
 	}
+	
 	data->client = client;
 	mutex_init(&en_mutex);
 #ifdef CONFIG_IR_REMOCON_FPGA
 	data->pdata = client->dev.platform_data;
 	mutex_init(&data->mutex);
-#ifdef USING_CONSUMERIR_SERVICE
-	data->count = 0;
-	data->length = 0;
-	data->ir_sum = 0;
-#else
 	data->count = 2;
-#endif
-	data->ir_freq = 0;
 	data->on_off = 0;
 #endif
 	i2c_set_clientdata(client, data);
-#ifdef USING_CONSUMERIR_SERVICE
-	g_data = data;
-	if(misc_register(&ice4_device)) {
-		pr_err("ice4_probe: ice4_device register failed\n");
-		goto exit_misc_device_register_failed;
-	}
-#endif
-	/* Registration of sysfs interface */
+
 	barcode_emul_dev = device_create(sec_class, NULL, 0,
 				data, "sec_barcode_emul");
 
@@ -1416,9 +1306,7 @@ static int __devinit barcode_emul_probe(struct i2c_client *client,
 	Is_beaming = BEAMING_OFF;
 
 	pr_err("probe complete %s\n", __func__);
-#ifdef USING_CONSUMERIR_SERVICE
-exit_misc_device_register_failed:
-#endif
+
 	return 0;
 
 err_free_mem:
@@ -1431,27 +1319,33 @@ static int __devexit barcode_emul_remove(struct i2c_client *client)
 	struct barcode_emul_data *data = i2c_get_clientdata(client);
 
 	i2c_set_clientdata(client, NULL);
-#ifdef USING_CONSUMERIR_SERVICE
-	misc_deregister(&ice4_device);
-#endif
 	kfree(data);
 	return 0;
 }
 
-static const struct i2c_device_id ice4_id[] = {
-	{"ice4", 0},
+static const struct i2c_device_id barcode_id[] = {
+	{"barcode", 0},
 	{}
 };
-MODULE_DEVICE_TABLE(i2c, ice4_id);
+MODULE_DEVICE_TABLE(i2c, barcode_id);
+#ifdef CONFIG_OF
+static struct of_device_id barcode_match_table[] = {
+	{ .compatible = "barcode,barcode_emul",},
+	{ },
+};
+#else
+#define barcode_match_table	NULL
+#endif
 
 static struct i2c_driver ice4_i2c_driver = {
 	.driver = {
-		.name = "ice4",
+		.name = "barcode",
 		.owner = THIS_MODULE,
+		.of_match_table = barcode_match_table,
 	},
 	.probe = barcode_emul_probe,
 	.remove = __devexit_p(barcode_emul_remove),
-	.id_table = ice4_id,
+	.id_table = barcode_id,
 };
 
 static int __init barcode_emul_init(void)
@@ -1474,3 +1368,4 @@ module_exit(barcode_emul_exit);
 
 MODULE_LICENSE("GPL");
 MODULE_DESCRIPTION("SEC Barcode emulator");
+
