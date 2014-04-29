@@ -83,7 +83,11 @@ static int msm_thermal_get_freq_table(void)
 	while (table[i].frequency != CPUFREQ_TABLE_END)
 		i++;
 
+#ifdef CONFIG_LOW_CPUCLOCKS
+	limit_idx_low = 4; // 378000
+#else
 	limit_idx_low = 0;
+#endif
 	limit_idx_high = limit_idx = i - 1;
 	BUG_ON(limit_idx_high <= 0 || limit_idx_high <= limit_idx_low);
 fail:
@@ -579,7 +583,7 @@ int __init msm_thermal_init(struct msm_thermal_data *pdata)
 	if (num_possible_cpus() > 1)
 		core_control_enabled = 1;
 	intellithermal_wq = alloc_workqueue("intellithermal",
-				WQ_UNBOUND | WQ_MEM_RECLAIM, 1);
+				WQ_UNBOUND | WQ_MEM_RECLAIM, 0);
 	INIT_DELAYED_WORK(&check_temp_work, check_temp);
 	queue_delayed_work(intellithermal_wq, &check_temp_work, 0);
 
