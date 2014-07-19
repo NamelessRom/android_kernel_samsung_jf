@@ -20,7 +20,7 @@
 #include "kgsl_sharedmem.h"
 #include "kgsl_cffdump.h"
 #include "a3xx_reg.h"
-#include "adreno_a3xx_trace.h"
+//#include "adreno_a3xx_trace.h"
 
 /*
  * Set of registers to dump for A3XX on postmortem and snapshot.
@@ -3486,7 +3486,7 @@ irqreturn_t a3xx_irq_handler(struct adreno_device *adreno_dev)
 		tmp >>= 1;
 	}
 
-	trace_kgsl_a3xx_irq_status(device, status);
+	//trace_kgsl_a3xx_irq_status(device, status);
 
 	if (status)
 		adreno_writereg(adreno_dev, ADRENO_REG_RBBM_INT_CLEAR_CMD,
@@ -4143,7 +4143,7 @@ static void a3xx_soft_reset(struct adreno_device *adreno_dev)
 void *a3xx_snapshot(struct adreno_device *adreno_dev, void *snapshot,
 	int *remain, int hang);
 
-static void a3xx_postmortem_dump(struct adreno_device *adreno_dev)
+/*static void a3xx_postmortem_dump(struct adreno_device *adreno_dev)
 {
 	struct kgsl_device *device = &adreno_dev->dev;
 	unsigned int r1, r2, r3, rbbm_status;
@@ -4294,7 +4294,7 @@ static void a3xx_postmortem_dump(struct adreno_device *adreno_dev)
 		};
 		adreno_dump_fields(device, "INT_SGNL=", ints, ARRAY_SIZE(ints));
 	}
-}
+}*/
 
 /* Register offset defines for A3XX */
 static unsigned int a3xx_register_offsets[ADRENO_REG_REGISTER_MAX] = {
@@ -4392,6 +4392,6 @@ struct adreno_gpudev adreno_a3xx_gpudev = {
 	.coresight_enable = a3xx_coresight_enable,
 	.coresight_disable = a3xx_coresight_disable,
 	.coresight_config_debug_reg = a3xx_coresight_config_debug_reg,
-	.postmortem_dump = a3xx_postmortem_dump,
+	//.postmortem_dump = a3xx_postmortem_dump,
 	.soft_reset = a3xx_soft_reset,
 };

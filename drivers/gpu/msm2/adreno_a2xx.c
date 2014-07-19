@@ -19,7 +19,7 @@
 #include "kgsl_sharedmem.h"
 #include "kgsl_cffdump.h"
 #include "adreno.h"
-#include "adreno_a2xx_trace.h"
+//#include "adreno_a2xx_trace.h"
 
 /*
  * These are the registers that are dumped with GPU snapshot
@@ -1772,7 +1772,7 @@ static void a2xx_cp_intrcallback(struct kgsl_device *device)
 			"Looped %d times to read REG_CP_INT_STATUS\n",
 			num_reads);
 
-	trace_kgsl_a2xx_irq_status(device, master_status, status);
+	//trace_kgsl_a2xx_irq_status(device, master_status, status);
 
 	if (!status) {
 		if (master_status & MASTER_INT_SIGNAL__CP_INT_STAT) {
@@ -2095,7 +2095,7 @@ static void a2xx_start(struct adreno_device *adreno_dev)
 	a2xx_gmeminit(adreno_dev);
 }
 
-static void a2xx_postmortem_dump(struct adreno_device *adreno_dev)
+/*static void a2xx_postmortem_dump(struct adreno_device *adreno_dev)
 {
 	unsigned int r1, r2, r3, rbbm_status;
 	unsigned int cp_stat, rb_count;
@@ -2260,7 +2260,7 @@ static void a2xx_postmortem_dump(struct adreno_device *adreno_dev)
 	kgsl_regread(device, MH_INTERRUPT_STATUS, &r2);
 	KGSL_LOG_DUMP(device,
 		"MH_INTERRUPT: MASK = %08X | STATUS   = %08X\n", r1, r2);
-}
+}*/
 
 /* Register offset defines for A2XX */
 static unsigned int a2xx_register_offsets[ADRENO_REG_REGISTER_MAX] = {
@@ -2314,5 +2314,5 @@ struct adreno_gpudev adreno_a2xx_gpudev = {
 	.rb_init = a2xx_rb_init,
 	.busy_cycles = a2xx_busy_cycles,
 	.start = a2xx_start,
-	.postmortem_dump = a2xx_postmortem_dump,
+	//.postmortem_dump = a2xx_postmortem_dump,
 };
