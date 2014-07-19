@@ -23,23 +23,16 @@ msm_kgsl_core-$(CONFIG_SYNC) += kgsl_sync.o
 msm_adreno-y += \
 	adreno_ringbuffer.o \
 	adreno_drawctxt.o \
-	adreno_postmortem.o \
 	adreno_snapshot.o \
 	adreno_a2xx.o \
-	adreno_a2xx_trace.o \
 	adreno_a2xx_snapshot.o \
 	adreno_a3xx.o \
-	adreno_a3xx_trace.o \
 	adreno_a3xx_snapshot.o \
 	adreno.o
 
 msm_adreno-$(CONFIG_DEBUG_FS) += adreno_debugfs.o
 
-msm_z180-y += \
-	z180.o \
-	z180_postmortem.o \
-	z180_trace.o
-
+msm_z180-y += z180.o
 msm_kgsl_core-objs = $(msm_kgsl_core-y)
 msm_adreno-objs = $(msm_adreno-y)
 msm_z180-objs = $(msm_z180-y)
