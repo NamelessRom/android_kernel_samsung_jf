@@ -19,7 +19,7 @@
 #include "kgsl_sharedmem.h"
 #include "kgsl_cffdump.h"
 #include "adreno.h"
-#include "adreno_a2xx_trace.h"
+//#include "adreno_a2xx_trace.h"
 
 /*
  * These are the registers that are dumped with GPU snapshot
@@ -1717,7 +1717,7 @@ static void a2xx_cp_intrcallback(struct kgsl_device *device)
 			"Looped %d times to read REG_CP_INT_STATUS\n",
 			num_reads);
 
-	trace_kgsl_a2xx_irq_status(device, master_status, status);
+	//trace_kgsl_a2xx_irq_status(device, master_status, status);
 
 	if (!status) {
 		if (master_status & MASTER_INT_SIGNAL__CP_INT_STAT) {

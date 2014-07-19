@@ -16,7 +16,7 @@
 #include <linux/module.h>
 #include <kgsl_device.h>
 
-#include "kgsl_trace.h"
+//#include "kgsl_trace.h"
 
 static inline struct list_head *_get_list_head(struct kgsl_device *device,
 		struct kgsl_context *context)
@@ -48,7 +48,7 @@ static inline void _do_signal_event(struct kgsl_device *device,
 {
 	int id = event->context ? event->context->id : KGSL_MEMSTORE_GLOBAL;
 
-	trace_kgsl_fire_event(id, timestamp, type, jiffies - event->created);
+	//trace_kgsl_fire_event(id, timestamp, type, jiffies - event->created);
 
 	if (event->func)
 		event->func(device, event->priv, id, timestamp, type);
@@ -217,7 +217,7 @@ int kgsl_add_event(struct kgsl_device *device, u32 id, u32 ts,
 	 */
 
 	if (timestamp_cmp(cur_ts, ts) >= 0) {
-		trace_kgsl_fire_event(id, cur_ts, ts, 0);
+		//trace_kgsl_fire_event(id, cur_ts, ts, 0);
 
 		func(device, priv, id, ts, KGSL_EVENT_TIMESTAMP_RETIRED);
 		kgsl_context_put(context);
@@ -247,7 +247,7 @@ int kgsl_add_event(struct kgsl_device *device, u32 id, u32 ts,
 	event->owner = owner;
 	event->created = jiffies;
 
-	trace_kgsl_register_event(id, ts);
+	//trace_kgsl_register_event(id, ts);
 
 	/* Add the event to either the owning context or the global list */
 
